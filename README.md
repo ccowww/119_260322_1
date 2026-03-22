@@ -1,6 +1,6 @@
 # C-CASA 8-Level Triage Pipeline (`c_casa_triage_8level.py`)
 
-119 수보 텍스트를 **KoNLPy Okt 형태소 분석기**로 전처리한 뒤,
+119 수보(受報) 텍스트를 **KoNLPy Okt 형태소 분석기**로 전처리한 뒤,
 정규표현식 기반으로 **5개 임상 변수**를 추출하여
 **C-CASA 8단계 응급도**로 분류하는 파이썬 파이프라인입니다.
 
@@ -215,18 +215,24 @@ CSV 포맷 폴더도 지원하며, 동일 필드명을 컬럼으로 인식합니
 
 ### Behavior 패턴 — 3단계 평가 구조
 
-Behavior는 단일 사전이 아닌 **3개 패턴 그룹**을 순차 평가하는 `extract_behavior` 함수로 판정합니다:
+Behavior는 단일 사전이 아닌 **4개 패턴 그룹**을 순차 평가하는 `extract_behavior` 함수로 판정합니다:
 
 ```
 Step A: Actual_Physical 매칭?  ──Yes──▶  return "Actual"  (override, FN 방지)
          │ No
-Step B: Actual_Drug 매칭?  ──Yes──▶  Routine Exclusion 매칭?
-         │ No                          ├─ Yes → 무시 (루틴 복약)
-         │                             └─ No  → return "Actual" (과다복용)
+Step B: Actual_Drug 매칭?  ──Yes──▶  Overdose Override 매칭?
+         │ No                          ├─ Yes → return "Actual" ★★★ (exclusion 무시)
+         │                             └─ No  → Routine Exclusion 매칭?
+         │                                       ├─ Yes → 무시 (루틴 복약)
+         │                                       └─ No  → return "Actual" (과다복용)
 Step C: Unknown 매칭?  ──Yes──▶  return "Unknown"
          │ No
          └──▶  return "None"
 ```
+
+> **★★★ Overdose Override 규칙**: 루틴 복약 제외 패턴에 매칭되더라도 과다 복용
+> 정황(한꺼번에, 50알, 몽땅 등)이 동시에 존재하면 exclusion을 무시하고 `Actual`을 반환합니다.
+> 예: "원래 먹던 우울증 약 50개를 한꺼번에 먹었어요" → `Actual` (Override)
 
 #### Actual_Physical (`_BEHAVIOR_PHYSICAL_RAW`)
 
@@ -260,6 +266,23 @@ Step C: Unknown 매칭?  ──Yes──▶  return "Unknown"
 |---|---|---|
 | `(우울증\|정신과\|처방\|원래\|평소).*?약.*?먹다` | "우울증 약 먹고 있다" | Actual 판정 억제 |
 | `약.*?먹다\s*있다` | "약 먹다 있다" (Okt 어간) | Actual 판정 억제 |
+
+#### 과다 복용 Override (`_OVERDOSE_RAW`)
+
+루틴 복약 제외 패턴에 매칭되더라도, 아래 과다 복용 정황이 동시에 존재하면 exclusion을 무시하고 `Actual`로 판정합니다.
+
+| 패턴 | 탐지 예시 |
+|---|---|
+| `(한꺼번에\|몽땅\|다량\|잔뜩\|왕창\|한.*?움큼\|전부\|과다)` | "한꺼번에 먹었다", "과다 복용" |
+| `(수십\|수백\|여러)\s*(알\|개\|봉지\|통)` | "수십 알", "여러 통" |
+| `[0-9]{2,}\s*(알\|개\|봉지\|통)` | "50알", "30개" |
+| `(엄청\|많이\|다)\s*(먹\|삼키\|털\|복용\|들다)` | "엄청 먹었다", "다 삼키다" |
+| `(먹다.*?버리\|먹어.*?버리\|털어.*?넣)` | "먹어 버리다", "털어 넣다" |
+
+> **[Bug Fix]** "원래 먹던 우울증 약 50개를 한꺼번에 먹었어요"처럼 루틴 복약 키워드와 극단적
+> 과다 복용 정황이 혼재된 경우, 기존 로직은 `_ROUTINE_MED_EXCLUSION_RAW`에 걸려
+> `Behavior="None"`으로 무시하여 치명적 Under-triage(FN)를 유발했습니다.
+> Overdose Override 패턴을 추가하여 과다 복용 증거가 있으면 exclusion을 무시합니다.
 
 #### Unknown (`_BEHAVIOR_UNKNOWN_RAW`)
 
@@ -344,7 +367,29 @@ Step C: Unknown 매칭?  ──Yes──▶  return "Unknown"
 
 ## 버전별 주요 변경 이력
 
-### v5 — 현재 (`c_casa_8level_results_v5.csv`)
+### v6 — 현재
+
+**변경 내용 (v5 → v6):**
+
+1. **`_OVERDOSE_RAW` 패턴 신규 추가** — 과다 복용 Override:
+   - `한꺼번에`, `몽땅`, `다량`, `잔뜩`, `왕창`, `한 움큼`, `전부`, `과다`
+   - `수십/수백/여러` + `알/개/봉지/통`
+   - 2자리 이상 숫자 + `알/개/봉지/통` (예: `50알`, `30개`)
+   - `엄청/많이/다` + `먹/삼키/털/복용/들다`
+   - `먹다 버리`, `먹어 버리`, `털어 넣`
+
+2. **`extract_behavior` Step B 로직 수정** — Overdose Override:
+   - `BEHAVIOR_DRUG_PATTERNS` 매칭 시, `OVERDOSE_PATTERNS`가 동시 매칭되면
+     `ROUTINE_MED_EXCLUSION_PATTERNS` 매칭 여부와 관계없이 무조건 `"Actual"` 반환
+   - **해결 사례**: "원래 먹던 우울증 약 50개를 한꺼번에 먹었어요"
+     → 기존: `Routine Exclusion` 매칭 → `Behavior=None` (FN, Under-triage)
+     → 수정: `Overdose Override` 매칭 → `Behavior=Actual` → Level 2 (정상 분류)
+
+> **[Bug Fix]** 루틴 복약 키워드(원래, 우울증 등)와 극단적 과다 복용(50개, 한꺼번에)이
+> 혼재된 발화에서 `_ROUTINE_MED_EXCLUSION_RAW`만 평가하여 치명적 FN(Under-triage)이
+> 발생하던 엣지 케이스를 `_OVERDOSE_RAW` Override 로직으로 해결했습니다.
+
+### v5 — (`c_casa_8level_results_v5.csv`)
 
 > 실행 결과 (2026-03-22, n=523건):
 >
@@ -457,7 +502,7 @@ Step C: Unknown 매칭?  ──Yes──▶  return "Unknown"
 1. **후행 부정 미탐지**: "죽고 싶지 않아요" → Okt 출력 `"죽다 싶다 않다"`. Lookbehind는 선행 부정만 처리하므로 후행 부정은 완전히 포착하지 못합니다. `Intent["No"]` 패턴이 부분 보완하나 100% 대응은 불가합니다.
 2. **단음절 동음이의어**: "다리"(bridge vs. leg), "가스"(gas vs. 가스레인지) 등은 정규식 수준에서 구분이 불가능합니다.
 3. **Up-triage 과잉 격상 가능성**: `Intent=Yes + Behavior=None + 명시적 부정 없음` 케이스는 전부 Level 2로 분류됩니다. 실제로는 구두 위협에 불과한 케이스가 포함될 수 있습니다. `_EXPLICIT_DENIAL_RAW` 패턴을 지속적으로 보강하여 정밀도를 개선해야 합니다.
-4. **루틴 복약 제외 범위**: "우울증 약 먹고 있다"는 제외하지만, "원래 먹던 약을 한꺼번에 먹었다"처럼 루틴 약물을 과다복용한 경우는 E 카테고리(약물 과다 복용 정황)에서 별도 매칭됩니다. 경계 사례에서 오분류 가능성이 있습니다.
+4. **루틴 복약 제외 범위**: "우울증 약 먹고 있다"는 제외하지만, 루틴 복약 키워드와 과다 복용이 혼재된 경우는 `_OVERDOSE_RAW` Override 로직이 exclusion을 무시합니다(v6에서 해결). 다만, Overdose 키워드에 포착되지 않는 새로운 표현이 등장하면 여전히 FN이 발생할 수 있으므로 `_OVERDOSE_RAW` 패턴의 지속적 보강이 필요합니다.
 5. **Okt JVM 의존성**: Java 11+ 및 `JAVA_HOME` 환경변수 설정이 필수입니다. JVM 초기화에 수 초가 소요됩니다.
 6. **원본 `triage` 컬럼 결측**: 입력 데이터의 `triage` 컬럼 결측은 원본 데이터의 미태깅 건으로, 파이프라인이 생성하는 `C-CASA_Level`과는 독립적입니다.
 7. **STT(Speech-to-Text) 전사 오류에 대한 취약성**: 긴박한 현장 소음이나 신고자의 당황한 어조로 인해 음성 인식(STT) 과정에서 심각한 오탈자(예: "수면제" $\rightarrow$ "수면재", "동맥" $\rightarrow$ "동매")나 띄어쓰기 오류가 발생할 경우, 형태소 분석 및 정규식 매칭이 실패하여 위음성(False Negative)을 유발할 수 있습니다.
