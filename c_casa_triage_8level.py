@@ -143,6 +143,18 @@ _ROUTINE_MED_EXCLUSION_RAW: list[str] = [
     r"약.*?먹다\s*있다",  # Okt 어간: "약을 먹고 있다" → "약 먹다 있다"
 ]
 
+# ── Behavior: 과다 복용(Overdose) Override 패턴 ──────────────────────────
+# 루틴 복약 제외 패턴에 매칭되더라도, 과다 복용 정황이 동시에 존재하면
+# exclusion을 무시하고 Actual로 판정한다.
+# 예: "원래 먹던 우울증 약 50개를 한꺼번에 먹었어요" → Actual (Override)
+_OVERDOSE_RAW: list[str] = [
+    r"(한꺼번에|몽땅|다량|잔뜩|왕창|한.*?움큼|전부|과다)",
+    r"(수십|수백|여러)\s*(알|개|봉지|통)",
+    r"[0-9]{2,}\s*(알|개|봉지|통)",
+    r"(엄청|많이|다)\s*(먹|삼키|털|복용|들다)",
+    r"(먹다.*?버리|먹어.*?버리|털어.*?넣)",
+]
+
 # ── Behavior: Unknown ────────────────────────────────────────────────────
 _BEHAVIOR_UNKNOWN_RAW: list[str] = [
     r"(무슨.*?일|뭐.*?하다|상황.*?모르다|잘.*?모르겠다)",
@@ -251,6 +263,7 @@ ACCIDENT_PATTERNS = _compile_dict(_ACCIDENT_RAW)
 BEHAVIOR_PHYSICAL_PATTERNS: list[re.Pattern] = _compile(_BEHAVIOR_PHYSICAL_RAW)
 BEHAVIOR_DRUG_PATTERNS: list[re.Pattern] = _compile(_BEHAVIOR_DRUG_RAW)
 ROUTINE_MED_EXCLUSION_PATTERNS: list[re.Pattern] = _compile(_ROUTINE_MED_EXCLUSION_RAW)
+OVERDOSE_PATTERNS: list[re.Pattern] = _compile(_OVERDOSE_RAW)
 BEHAVIOR_UNKNOWN_PATTERNS: list[re.Pattern] = _compile(_BEHAVIOR_UNKNOWN_RAW)
 FATALITY_PATTERNS = _compile_dict(_FATALITY_RAW)
 INTERRUPTED_PATTERNS = _compile_dict(_INTERRUPTED_RAW)
@@ -319,9 +332,12 @@ def extract_behavior(text: str) -> str:
         return "Actual"
 
     # Step B: Actual_Drug — 약물 섭취 패턴에만 루틴 복약 제외 로직 적용.
-    # "약을 많이 먹었다" → Actual, "우울증 약 먹고 있다" → 무시.
+    # 단, 과다 복용(Overdose) 정황이 있으면 exclusion을 무시하고 Actual 반환.
+    # "우울증 약 먹고 있다" → 무시, "우울증 약 50알 한꺼번에 먹다" → Actual (Override).
     if any(p.search(text) for p in BEHAVIOR_DRUG_PATTERNS):
-        if not any(p.search(text) for p in ROUTINE_MED_EXCLUSION_PATTERNS):
+        is_routine = any(p.search(text) for p in ROUTINE_MED_EXCLUSION_PATTERNS)
+        is_overdose = any(p.search(text) for p in OVERDOSE_PATTERNS)
+        if not is_routine or is_overdose:
             return "Actual"
 
     # Step C: Unknown — 상황 불명·연락 두절.
