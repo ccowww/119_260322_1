@@ -142,7 +142,7 @@ CSV 포맷 폴더도 지원하며, 동일 필드명을 컬럼으로 인식합니
 | **3** | Preparatory Behavior | 시도 직전 준비 행동 / 중단·저지됨 |
 | **4** | Suicide Ideation | 자살 의도 표현, 행동 명시적 부정 또는 의도 철회 |
 | **5** | Self-Injurious Behavior, Intent Unknown | 자해 행동 있음, 의도 불명 |
-| **6** | Not Enough Information | 정보 불충분, 상황 불명, 신원확인 요청 |
+| **6** | Not Enough Information | 정보 불충분, 상황 불명, 신변확인 요청 |
 | **7** | Self-Injurious Behavior, No Suicidal Intent | 자해 행동 있음, 자살 의도 없음 |
 | **8** | Other | 사고 판정 또는 해당 없음 |
 
