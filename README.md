@@ -1,6 +1,6 @@
 # C-CASA 8-Level Triage Pipeline (`c_casa_triage_8level.py`)
 
-119 수보(受報) 텍스트를 **KoNLPy Okt 형태소 분석기**로 전처리한 뒤,
+119 수보 텍스트를 **KoNLPy Okt 형태소 분석기**로 전처리한 뒤,
 정규표현식 기반으로 **5개 임상 변수**를 추출하여
 **C-CASA 8단계 응급도**로 분류하는 파이썬 파이프라인입니다.
 
@@ -149,6 +149,8 @@ CSV 포맷 폴더도 지원하며, 동일 필드명을 컬럼으로 인식합니
 ---
 
 ## 결정 트리 로직
+
+<img width="1237" height="548" alt="image" src="https://github.com/user-attachments/assets/9506cff8-fbe0-4a8e-bb4e-d101ad752ae7" />
 
 ```
 입력: Accident · Behavior · Fatality · Interrupted · Intent · stemmed_text
